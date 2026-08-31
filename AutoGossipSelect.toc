@@ -1,0 +1,7 @@
+## Interface: 120001
+## Title: AutoGossipSelect
+## Notes: Automatically selects gossip options, skips cinematics, and provides a Lorewalking sound reminder.
+## Author: AutoGossipSelect
+## Version: 1.0.0
+## SavedVariables: AutoGossipSelectDB
+AutoGossipSelect.lua
