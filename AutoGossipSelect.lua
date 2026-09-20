@@ -203,21 +203,177 @@ local minimapButton = CreateFrame(
     Minimap
 )
 
-minimapButton:SetSize(32, 32)
+minimapButton:SetSize(31, 31)
 minimapButton:SetFrameStrata("MEDIUM")
-minimapButton:SetNormalTexture(
-    "Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight"
-)
-minimapButton:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 0, 0)
+minimapButton:SetFrameLevel(Minimap:GetFrameLevel() + 8)
 
-minimapButton.icon = minimapButton:CreateTexture(nil, "BACKGROUND")
-minimapButton.icon:SetSize(20, 20)
-minimapButton.icon:SetPoint("CENTER")
-minimapButton.icon:SetTexture("Interface\\Icons\\INV_Misc_Book_11")
+-- Make the button orbit outside the minimap edge like the surrounding buttons.
+local minimapButtonAngle = math.rad(220)
+local minimapButtonRadius = 108
 
-minimapButton:SetScript("OnClick", function()
-    ToggleInstructionList()
+local function UpdateMinimapButtonPosition()
+    local angle = minimapButtonAngle
+    minimapButton:ClearAllPoints()
+    minimapButton:SetPoint(
+        "CENTER", Minimap, "CENTER",
+        math.cos(angle) * minimapButtonRadius,
+        math.sin(angle) * minimapButtonRadius
+    )
+end
+
+UpdateMinimapButtonPosition()
+
+minimapButton:SetMovable(true)
+minimapButton:RegisterForDrag("LeftButton")
+minimapButton:SetScript("OnDragStart", function(self)
+    self:SetScript("OnUpdate", function(button)
+        local mx, my = Minimap:GetCenter()
+        local bx, by = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        bx, by = bx / scale, by / scale
+        minimapButtonAngle = math.atan2(by - my, bx - mx)
+        UpdateMinimapButtonPosition()
+    end)
 end)
+
+minimapButton:SetScript("OnDragStop", function(self)
+    self:SetScript("OnUpdate", nil)
+end)
+
+-- Clean circular minimap icon.
+-- Do not crop MiniMap-TrackingBorder: it is not a simple standalone ring.
+minimapButton.icon = minimapButton:CreateTexture(nil, "ARTWORK")
+minimapButton.icon:SetSize(22, 22)
+minimapButton.icon:SetPoint("CENTER", 0, 0)
+minimapButton.icon:SetTexture("Interface\\Icons\\INV_Misc_Book_11")
+minimapButton.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+-- Circularly mask the square inventory icon.
+minimapButton.iconMask = minimapButton:CreateMaskTexture()
+minimapButton.iconMask:SetAllPoints(minimapButton.icon)
+minimapButton.iconMask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask")
+minimapButton.icon:AddMaskTexture(minimapButton.iconMask)
+
+-- Simple Blizzard minimap-style ring. Use the full texture without atlas cropping.
+minimapButton.border = minimapButton:CreateTexture(nil, "OVERLAY")
+minimapButton.border:SetSize(31, 31)
+minimapButton.border:SetPoint("CENTER", 0, 0)
+minimapButton.border:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+minimapButton.border:SetBlendMode("ADD")
+minimapButton.border:SetAlpha(0.55)
+
+-- Stronger highlight only while hovering.
+minimapButton.highlight = minimapButton:CreateTexture(nil, "HIGHLIGHT")
+minimapButton.highlight:SetSize(31, 31)
+minimapButton.highlight:SetPoint("CENTER", 0, 0)
+minimapButton.highlight:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+minimapButton.highlight:SetBlendMode("ADD")
+
+-- Right-click addon options menu.
+local minimapMenu = CreateFrame("Frame", "AutoGossipSelectMinimapMenu", UIParent, "BackdropTemplate")
+minimapMenu:SetSize(210, 270)
+minimapMenu:SetFrameStrata("DIALOG")
+minimapMenu:SetBackdrop({
+    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+    tile = true,
+    tileSize = 32,
+    edgeSize = 16,
+    insets = { left = 4, right = 4, top = 4, bottom = 4 },
+})
+minimapMenu:Hide()
+
+local function AddMinimapMenuButton(text, onClick)
+    local button = CreateFrame("Button", nil, minimapMenu, "UIPanelButtonTemplate")
+    button:SetSize(180, 28)
+    button:SetText(text)
+    button:SetScript("OnClick", function()
+        onClick()
+        minimapMenu:Hide()
+    end)
+    return button
+end
+
+local menuTitle = minimapMenu:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+menuTitle:SetPoint("TOP", 0, -12)
+menuTitle:SetText("AutoGossipSelect")
+
+local menuButtons = {}
+local function RefreshMinimapMenu()
+    for _, button in ipairs(menuButtons) do
+        button:Hide()
+    end
+    menuButtons = {}
+
+    local function Add(text, action)
+        local button = AddMinimapMenuButton(text, action)
+        button:SetPoint("TOP", 0, -42 - (#menuButtons * 31))
+        menuButtons[#menuButtons + 1] = button
+    end
+
+    Add("Auto Select: " .. (enabled and "ON" or "OFF"), function()
+        enabled = not enabled
+        if not enabled and lorewalkingTimer then
+            lorewalkingTimer:Cancel()
+            lorewalkingTimer = nil
+            lorewalkingSecondsRemaining = 0
+            UpdateLorewalkingTimerDisplay()
+        end
+        Msg("Auto select: " .. (enabled and "ON" or "OFF"))
+    end)
+
+    Add("XP/hr Display: " .. (xpDisplayEnabled and "ON" or "OFF"), function()
+        xpDisplayEnabled = not xpDisplayEnabled
+        UpdateXPDisplay()
+        Msg("XP/hr display: " .. (xpDisplayEnabled and "ON" or "OFF"))
+    end)
+
+    Add("Cinematic Skip: " .. (cinematicSkipEnabled and "ON" or "OFF"), function()
+        cinematicSkipEnabled = not cinematicSkipEnabled
+        Msg("Cinematic auto-skip: " .. (cinematicSkipEnabled and "ON" or "OFF"))
+    end)
+
+    Add("Reminder Sound: " .. (lorewalkingSoundEnabled and "ON" or "OFF"), function()
+        lorewalkingSoundEnabled = not lorewalkingSoundEnabled
+        if not lorewalkingSoundEnabled and lorewalkingTimer then
+            lorewalkingTimer:Cancel()
+            lorewalkingTimer = nil
+            lorewalkingSecondsRemaining = 0
+            UpdateLorewalkingTimerDisplay()
+        end
+        Msg("Lorewalking reminder sound: " .. (lorewalkingSoundEnabled and "ON" or "OFF"))
+    end)
+
+    Add("Reset XP/hr", function()
+        StartXPTracking()
+        Msg("XP/hr tracking reset.")
+    end)
+
+    Add("Instructions", function()
+        ShowInstructionList()
+    end)
+end
+
+local function ToggleMinimapMenu()
+    if minimapMenu:IsShown() then
+        minimapMenu:Hide()
+        return
+    end
+
+    RefreshMinimapMenu()
+    minimapMenu:ClearAllPoints()
+    minimapMenu:SetPoint("TOPRIGHT", minimapButton, "BOTTOMLEFT", -4, -4)
+    minimapMenu:Show()
+end
+
+minimapButton:SetScript("OnClick", function(self, button)
+    if button == "RightButton" then
+        ToggleMinimapMenu()
+    else
+        ToggleInstructionList()
+    end
+end)
+minimapButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
 minimapButton:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
